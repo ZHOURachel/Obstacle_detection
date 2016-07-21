@@ -32,6 +32,8 @@ double threshold = 0.05;
 // the maximun iteration time for RANSAC
 size_t maxIteration = 1000;
 
+double robot_height = 0.8;
+
 // PCL visualizer
 pcl::visualization::PCLVisualizer viewer("PCL Viewer");
 
@@ -203,14 +205,18 @@ pcl::PointIndices::Ptr plane_segmentation( pcl::PointCloud<PointT>::Ptr cloud,
 
 bool verifyPlaneModel(pcl::ModelCoefficients::Ptr coefficients_plane)
 {
-	double cosTheta = (coefficients_plane->values[1]) /
+	double cosTheta = ( coefficients_plane->values[1] * 1 ) /
 	                  ( sqrt( coefficients_plane->values[0] * coefficients_plane->values[0]
 	                          + coefficients_plane->values[1] * coefficients_plane->values[1]
 	                          + coefficients_plane->values[2] * coefficients_plane->values[2])
-	                    * sqrt(1 * 1 + 0.8 * 0.8));
-	std::cout << "cosTheta = " << cosTheta << "		" << "theta =" << acos(cosTheta) << std::endl;
-	std::cout << "theta= " << 180 - acos(cosTheta) * 180 / 3.1415 << std::endl;
-	return true;
+	                    * sqrt( 1 * 1 ) );
+	double theta =  acos(cosTheta) * 180 / 3.1415 ;
+	// std::cout << "cosTheta = " << cosTheta << "		" << "theta = " << acos(cosTheta) << std::endl;
+	// std::cout << "theta= " << theta << std::endl;
+	if ( theta > 20 && theta < 160)
+		return false;
+	else
+		return true;
 }
 
 bool verifyPlaneModel(Eigen::VectorXf& coefficients_plane)
@@ -219,10 +225,17 @@ bool verifyPlaneModel(Eigen::VectorXf& coefficients_plane)
 	                  ( sqrt( coefficients_plane[0] * coefficients_plane[0]
 	                          + coefficients_plane[1] * coefficients_plane[1]
 	                          + coefficients_plane[2] * coefficients_plane[2])
-	                    * sqrt(1 * 1 + 0.8 * 0.8));
-	std::cout << "cosTheta = " << cosTheta << "		" << "theta =" << acos(cosTheta) << std::endl;
-	std::cout << "theta= " << 180 - acos(cosTheta) * 180 / 3.1415 << std::endl;
-	return true;
+	                    * sqrt( 1 * 1 ) );
+	double theta = acos(cosTheta) * 180 / 3.1415 ;
+
+	// double theta = (acos(cosTheta) * 180 / 3.1415)  > 90 ?  ( 180 - acos(cosTheta) * 180 ) : ( acos(cosTheta) * 180 / 3.1415 ) ;
+
+	// std::cout << "cosTheta = " << cosTheta << "		" << "theta = " << acos(cosTheta) << std::endl;
+	// std::cout << "theta = " << theta << std::endl;
+	if ( theta > 20 && theta < 160)
+		return false;
+	else
+		return true;
 }
 
 void reComputePlaneModelCoefficients( pcl::PointCloud<PointT>::Ptr cloud,
@@ -245,6 +258,23 @@ void reComputePlaneModelCoefficients( pcl::PointCloud<PointT>::Ptr cloud,
 
 }
 
+void resetPlaneModel(pcl::ModelCoefficients::Ptr coefficients_plane)
+{
+	coefficients_plane->values[0] = 0;
+	coefficients_plane->values[1] = -1;
+	coefficients_plane->values[2] = 0;
+	coefficients_plane->values[3] = robot_height;
+}
+
+
+void resetPlaneModel(Eigen::VectorXf& coefficients_plane)
+{
+	coefficients_plane[0] = 0;
+	coefficients_plane[1] = -1;
+	coefficients_plane[2] = 0;
+	coefficients_plane[3] = robot_height;
+	// std::cout << "after reset" << std::endl << coefficients_plane << std::endl;
+}
 
 /**
  * extract the points of the plane into the cloud_plane, with the index in the PointIndices
@@ -333,11 +363,11 @@ void calibratePlaneCoefficients (PointCloudT::Ptr cloud,
 	// std::cout << "The plane coefficients calibrated!" << std::endl;
 
 	// write the plane coefficients in  plane_coffficients.txt
-	ofstream fout( "plane_coefficients.txt ", ios::app);
-	fout << model_coefficients[0] << "       "
-	     << model_coefficients[1] << "        "
-	     << model_coefficients[2] << "        "
-	     << model_coefficients[3] << std::endl << std::endl;
+	// ofstream fout( "plane_coefficients.txt ", ios::app);
+	// fout << model_coefficients[0] << "       "
+	//      << model_coefficients[1] << "        "
+	//      << model_coefficients[2] << "        "
+	//      << model_coefficients[3] << std::endl << std::endl;
 }
 
 /**
@@ -562,7 +592,7 @@ void createOccupancyMap ( PointCloudT::Ptr cloud_obstacle, const std::vector<flo
 	origin.z = 0.f;
 
 	float height_origin = getDistanceFromPlane(model_coefficients, origin);
-	std::cout << " the origin point height = " << height_origin <<std::endl;
+	std::cout << " the origin point height = " << height_origin << std::endl;
 
 	origin.x = - height_origin * plane_normal.normal_x;
 	origin.y = - height_origin * plane_normal.normal_y;
@@ -983,12 +1013,12 @@ int main()
 	//                    coefficients_plane->values[2],
 	//                    coefficients_plane->values[3];
 
-	// model_coefficients[0] = 0;
-	// model_coefficients[1] = 1;
-	// model_coefficients[2] = 0;
-	// model_coefficients[3] = -0.8;
-
 	bool isValid =  verifyPlaneModel(model_coefficients);
+	if (!isValid)
+	{
+		resetPlaneModel(model_coefficients);
+		std::cout << "the plane coefficients are not valid! They have been reset! " << std::endl;
+	}
 	// std::vector<int> inlier_plane;
 	// double startTime = pcl::getTime();
 	// reComputePlaneModelCoefficients(cloud, model_coefficients, maxIteration, threshold, inlier_plane);
@@ -1011,11 +1041,11 @@ int main()
 	static double last = pcl::getTime();
 	// openPort();
 
-	ofstream fout( "plane_coefficients.txt ", ios::app);
-	fout << "*****************************************************************" << std::endl;
+	// ofstream fout( "plane_coefficients.txt ", ios::app);
+	// fout << "*****************************************************************" << std::endl;
 	while (!viewer.wasStopped())
 	{
-		double startFrame = pcl::getTime();
+		// double startFrame = pcl::getTime();
 		if (new_cloud_available_flag && cloud_mutex.try_lock ())
 		{
 			// std::cerr<< "New point cloud !"<<std::endl;
@@ -1024,6 +1054,12 @@ int main()
 			std::vector<int> inliers_plane;
 
 			pcl::removeNaNFromPointCloud(*cloud, *cloud, indices_Nans);
+
+			if ( !verifyPlaneModel(model_coefficients) )
+			{
+				reComputePlaneModelCoefficients(cloud, model_coefficients, maxIteration, threshold, inliers_plane);
+				std::cout << "Current plane model is wrong! recompute the plane model" << std::endl;
+			}
 
 			inliers_plane = findPlanePoint (model_coefficients, threshold, cloud);
 			if (inliers_plane.size() == 0)
@@ -1043,23 +1079,23 @@ int main()
 			pcl::PointCloud<PointT>::Ptr cloud_obstacle (new pcl::PointCloud<PointT> ());
 
 			std::vector<float> height;
-			double startExtractOb = pcl::getTime();
+			// double startExtractOb = pcl::getTime();
 			height = extractObstaclePoints(cloud, inliers_plane, model_coefficients, cloud_obstacle);
-			std::cout << "Extract obstacle point use " << pcl::getTime() - startExtractOb << " s" << std::endl;
+			// std::cout << "Extract obstacle point use " << pcl::getTime() - startExtractOb << " s" << std::endl;
 
 			// std::cout << "The obstacle cloud size = " << cloud_obstacle->size() << std::endl;
 			pcl::removeNaNFromPointCloud(*cloud_obstacle, *cloud_obstacle, indices_Nans);
 
-			double startCreateMap = pcl::getTime();
+			// double startCreateMap = pcl::getTime();
 			createOccupancyMap(cloud_obstacle, height, plane_normalVector, model_coefficients);
-			std::cout << "Create occupancy map use " << pcl::getTime() - startCreateMap << " s" << std::endl;
+			// std::cout << "Create occupancy map use " << pcl::getTime() - startCreateMap << " s" << std::endl;
 
 			// setVelocity();
-			double startReinitMap = pcl::getTime();
+			// double startReinitMap = pcl::getTime();
 			reinitOccupancyMap();
-			std::cout << "Reinit occupancy map use " << pcl::getTime() - startReinitMap << " s" << std::endl;
+			// std::cout << "Reinit occupancy map use " << pcl::getTime() - startReinitMap << " s" << std::endl;
 
-			double startShowCloud = pcl::getTime();
+			// double startShowCloud = pcl::getTime();
 			//update the point in the viewer
 			viewer.removeAllPointClouds ();
 			viewer.removeAllShapes();
@@ -1070,7 +1106,7 @@ int main()
 			// viewer.addPointCloud <PointT> (cloud, rgb, "rgb cloud", v2);
 			viewer.addPointCloud <PointT> (cloud_obstacle, obstacleRed, "obstacle_cloud");
 			viewer.addPointCloud <PointT> (cloud_plane, planeGreen, "plane_cloud");
-			std::cout << "Show cloud use " << pcl::getTime() - startShowCloud << std::endl;
+			// std::cout << "Show cloud use " << pcl::getTime() - startShowCloud << std::endl;
 			viewer.spinOnce();
 
 			// calculate the fps
@@ -1085,11 +1121,10 @@ int main()
 				setPlaneNormalVector(model_coefficients, plane_normalVector);
 				// optimizeModelCoefficients ( inliers, model_coefficients, model_coefficients);
 			}
-
 			cloud_mutex.unlock ();
-			std::cout << "One frame use " << pcl::getTime() - startFrame << " m" << std::endl;
+			// std::cout << "One frame use " << pcl::getTime() - startFrame << " m" << std::endl;
 		}
 	}
-	// sendVelocity(0, 0);
+	sendVelocity(0, 0);
 	return 0;
 }
