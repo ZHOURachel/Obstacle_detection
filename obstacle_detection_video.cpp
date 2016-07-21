@@ -1039,7 +1039,7 @@ int main()
 	// for the fps
 	static unsigned count = 0;
 	static double last = pcl::getTime();
-	// openPort();
+	openPort();
 
 	// ofstream fout( "plane_coefficients.txt ", ios::app);
 	// fout << "*****************************************************************" << std::endl;
@@ -1066,7 +1066,7 @@ int main()
 			{
 				std::cout << "No points in the plane!!!" << std::endl;
 				reComputePlaneModelCoefficients(cloud, model_coefficients, maxIteration, threshold, inliers_plane);
-				// sendVelocity(0, 0);
+				sendVelocity(0, 0);
 				std::cout << "recompute the plane model" << std::endl;
 				new_cloud_available_flag = true;
 				cloud_mutex.unlock ();
@@ -1090,7 +1090,7 @@ int main()
 			createOccupancyMap(cloud_obstacle, height, plane_normalVector, model_coefficients);
 			// std::cout << "Create occupancy map use " << pcl::getTime() - startCreateMap << " s" << std::endl;
 
-			// setVelocity();
+			setVelocity();
 			// double startReinitMap = pcl::getTime();
 			reinitOccupancyMap();
 			// std::cout << "Reinit occupancy map use " << pcl::getTime() - startReinitMap << " s" << std::endl;
