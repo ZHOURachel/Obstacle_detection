@@ -43,7 +43,7 @@ double spatial_resolution = 0.05;
 int matrix_size = 20 / spatial_resolution;
 
 // the number of the gride in length
-const int numGrideLength = 0.75 / spatial_resolution;
+const int numGrideLength = 0.8 / spatial_resolution;
 // the number of the gride in width
 const int numGrideWidth = 0.25 / spatial_resolution;
 
@@ -105,6 +105,9 @@ void cloud_cb_ (const PointCloudT::ConstPtr &callback_cloud, PointCloudT::Ptr& c
 	cloud_mutex.unlock ();
 }
 
+/**
+ * reset all the values of the occupancy map to 0
+ */
 void reinitOccupancyMap()
 {
 	occupancy_map.coordinatePositive.topLeftCorner(occupancy_map.coordinatePositive.rows(), occupancy_map.coordinatePositive.cols())
@@ -196,13 +199,18 @@ pcl::PointIndices::Ptr plane_segmentation( pcl::PointCloud<PointT>::Ptr cloud,
 	if (inliers_plane->indices.size () == 0)
 	{
 		PCL_ERROR ("Could not estimate a planar model for the given dataset.");
-		exit (0);
+		// exit (0);
 	}
 
 	return inliers_plane;
 }
 
-
+/**
+ * verify if the plane selected is correct or not, here we consider the standard plane model is 0x - y + 0z + height_robot = 0
+ * this function will calculate the angle between the normal vectors of the select plane and the standard plane, which the normal vector is (0, 1, 0)
+ * @param  coefficients_plane [the coefficients of the select plane model, here the type is pcl::ModelCoefficients::Ptr]
+ * @return                    [true if the selected plane is correct, false if not]
+ */
 bool verifyPlaneModel(pcl::ModelCoefficients::Ptr coefficients_plane)
 {
 	double cosTheta = ( coefficients_plane->values[1] * 1 ) /
@@ -219,6 +227,13 @@ bool verifyPlaneModel(pcl::ModelCoefficients::Ptr coefficients_plane)
 		return true;
 }
 
+
+/**
+ * verify if the plane selected is correct or not, here we consider the standard plane model is 0x - y + 0z + height_robot = 0
+ * this function will calculate the angle between the normal vectors of the select plane and the standard plane, which the normal vector is (0, 1, 0)
+ * @param  coefficients_plane [the coefficients of the select plane model, here the type is Eigen::VectorXf]
+ * @return                    [true if the selected plane is correct, false if not]
+ */
 bool verifyPlaneModel(Eigen::VectorXf& coefficients_plane)
 {
 	double cosTheta = (coefficients_plane[1]) /
@@ -238,6 +253,14 @@ bool verifyPlaneModel(Eigen::VectorXf& coefficients_plane)
 		return true;
 }
 
+/**
+ * recompute the plane model coefficients with the ransac algorithme
+ * @param cloud              [the input cloud]
+ * @param coefficients_plane [the current plane coefficients, after this function, the coefficients will be updated]
+ * @param maxIteration       [the max number of iterations for the algorithme]
+ * @param threshold          [the max distance between the points and the selected plane]
+ * @param inliers_plane      [the inliers points for the plane model]
+ */
 void reComputePlaneModelCoefficients( pcl::PointCloud<PointT>::Ptr cloud,
                                       Eigen::VectorXf&  coefficients_plane,
                                       size_t maxIteration, double threshold,
@@ -258,6 +281,10 @@ void reComputePlaneModelCoefficients( pcl::PointCloud<PointT>::Ptr cloud,
 
 }
 
+/**
+ * reset the plane coefficients by the standard plane coefficients, which is [0, -1, 0, robot_height]
+ * @param coefficients_plane [the current plane coefficients, after this function, the coefficients will be the standard plane coefficients]
+ */
 void resetPlaneModel(pcl::ModelCoefficients::Ptr coefficients_plane)
 {
 	coefficients_plane->values[0] = 0;
@@ -266,9 +293,13 @@ void resetPlaneModel(pcl::ModelCoefficients::Ptr coefficients_plane)
 	coefficients_plane->values[3] = robot_height;
 }
 
-
+/**
+ * reset the plane coefficients by the standard plane coefficients, which is [0, -1, 0, robot_height]
+ * @param coefficients_plane [the current plane coefficients, after this function, the coefficients will be the standard plane coefficients]
+ */
 void resetPlaneModel(Eigen::VectorXf& coefficients_plane)
 {
+	coefficients_plane.resize(4);
 	coefficients_plane[0] = 0;
 	coefficients_plane[1] = -1;
 	coefficients_plane[2] = 0;
@@ -789,7 +820,7 @@ void setVelocity()
 	}
 	else
 	{
-		if ( isStuck > 3 )   // if the robot is stuck in a corner where there are obstacles at both sides
+		if ( isStuck > 1 )   // if the robot is stuck in a corner where there are obstacles at both sides
 		{
 			rotation_v = turnDirection * w;
 			std::cout << "Aiibot gets stuck!!!!!" << std::endl;
@@ -1039,7 +1070,7 @@ int main()
 	// for the fps
 	static unsigned count = 0;
 	static double last = pcl::getTime();
-	openPort();
+	// openPort();
 
 	// ofstream fout( "plane_coefficients.txt ", ios::app);
 	// fout << "*****************************************************************" << std::endl;
@@ -1066,7 +1097,7 @@ int main()
 			{
 				std::cout << "No points in the plane!!!" << std::endl;
 				reComputePlaneModelCoefficients(cloud, model_coefficients, maxIteration, threshold, inliers_plane);
-				sendVelocity(0, 0);
+				// sendVelocity(0, 0);
 				std::cout << "recompute the plane model" << std::endl;
 				new_cloud_available_flag = true;
 				cloud_mutex.unlock ();
@@ -1090,7 +1121,7 @@ int main()
 			createOccupancyMap(cloud_obstacle, height, plane_normalVector, model_coefficients);
 			// std::cout << "Create occupancy map use " << pcl::getTime() - startCreateMap << " s" << std::endl;
 
-			setVelocity();
+			// setVelocity();
 			// double startReinitMap = pcl::getTime();
 			reinitOccupancyMap();
 			// std::cout << "Reinit occupancy map use " << pcl::getTime() - startReinitMap << " s" << std::endl;
