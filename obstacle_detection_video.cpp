@@ -16,6 +16,7 @@
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/passthrough.h>
 
 #include <Eigen/Dense>
 #include <boost/asio.hpp>
@@ -32,7 +33,7 @@ double threshold = 0.05;
 // the maximun iteration time for RANSAC
 size_t maxIteration = 1000;
 
-double robot_height = 0.8;
+double robot_height = 0.4;
 
 // PCL visualizer
 pcl::visualization::PCLVisualizer viewer("PCL Viewer");
@@ -47,12 +48,6 @@ const int numGrideLength = 0.8 / spatial_resolution;
 // the number of the gride in width
 const int numGrideWidth = 0.25 / spatial_resolution;
 
-const float v = 0.3;
-const float w = 0.5;
-int isStuck = 0;
-int turnDirection = 0;
-int oldDirection = 0;
-
 // the parametres for sending the velocity to the lower machine
 unsigned char startByte = 0xff;
 unsigned char endByte = 0xfe;
@@ -60,6 +55,13 @@ std::string Base_Port = "/dev/ttyUSB0";
 
 boost::asio::io_service iosev;
 boost::asio::serial_port sp(iosev);
+
+
+const float v = 0.3;
+const float w = 0.5;
+int isStuck = 0;
+int turnDirection = 0;
+int oldDirection = 0;
 
 // Mutex //
 boost::mutex cloud_mutex;
@@ -81,10 +83,10 @@ struct OccupancyMap
 
 // struct OccupancyMap
 // {
-// 	int coordinatePositive[100];
-// 	int coordinateNegative[100];
-// 	int pointsNumCounterPositive[100];
-// 	int pointsNumCounterNegative[100];
+// 	int coordinatePositive[500];
+// 	int coordinateNegative[500];
+// 	int pointsNumCounterPositive[500];
+// 	int pointsNumCounterNegative[500];
 // } occupancy_map ;
 
 
@@ -119,10 +121,16 @@ void reinitOccupancyMap()
 	occupancy_map.pointsNumCounterNegative.topLeftCorner(occupancy_map.pointsNumCounterNegative.rows(), occupancy_map.pointsNumCounterNegative.cols())
 	    = Eigen::MatrixXi::Zero(occupancy_map.pointsNumCounterNegative.rows(), occupancy_map.pointsNumCounterNegative.cols());
 
-	// memset(occupancy_map.coordinatePositive, 0, sizeof(occupancy_map.coordinatePositive));
+	// memset(&occupancy_map, 0, sizeof(occupancy_map));
 }
 
-
+// void reinitOccupancyMap()
+// {
+// 	memset(occupancy_map.coordinatePositive, 0, sizeof(occupancy_map.coordinatePositive));
+// 	memset(occupancy_map.coordinateNegative, 0, sizeof(occupancy_map.coordinateNegative));
+// 	memset(occupancy_map.pointsNumCounterPositive, 0, sizeof(occupancy_map.pointsNumCounterPositive));
+// 	memset(occupancy_map.pointsNumCounterNegative, 0, sizeof(occupancy_map.pointsNumCounterNegative));
+// }
 
 /**
  * open the port in order to send the velocity to the lower machine
@@ -154,6 +162,17 @@ void sendVelocity(float vTranslation, float vRotation)
 
 	//iosev.run();
 
+}
+
+
+void passthroughFilter( PointCloudT::Ptr& cloud, PointCloudT::Ptr& cloud_filtered, float filterLimit )
+{
+	pcl::PassThrough<PointT> pass;
+	pass.setInputCloud(cloud);
+	pass.setFilterFieldName("z");
+	pass.setFilterLimits(0.0, filterLimit);
+
+	pass.filter(*cloud_filtered);
 }
 
 /**
@@ -221,7 +240,7 @@ bool verifyPlaneModel(pcl::ModelCoefficients::Ptr coefficients_plane)
 	double theta =  acos(cosTheta) * 180 / 3.1415 ;
 	// std::cout << "cosTheta = " << cosTheta << "		" << "theta = " << acos(cosTheta) << std::endl;
 	// std::cout << "theta= " << theta << std::endl;
-	if ( theta > 20 && theta < 160)
+	if ( theta > 15 && theta < 165)
 		return false;
 	else
 		return true;
@@ -247,7 +266,7 @@ bool verifyPlaneModel(Eigen::VectorXf& coefficients_plane)
 
 	// std::cout << "cosTheta = " << cosTheta << "		" << "theta = " << acos(cosTheta) << std::endl;
 	// std::cout << "theta = " << theta << std::endl;
-	if ( theta > 20 && theta < 160)
+	if ( theta > 15 && theta < 165)
 		return false;
 	else
 		return true;
@@ -272,11 +291,14 @@ void reComputePlaneModelCoefficients( pcl::PointCloud<PointT>::Ptr cloud,
 	ransac.setMaxIterations(maxIteration);
 	ransac.computeModel();
 	ransac.getInliers(inliers_plane);
-	ransac.getModelCoefficients(coefficients_plane);
 
 	if (inliers_plane.size () == 0)
 	{
 		PCL_ERROR ("Could not estimate a planar model for the given dataset.");
+	}
+	else
+	{
+		ransac.getModelCoefficients(coefficients_plane);
 	}
 
 }
@@ -390,15 +412,6 @@ void calibratePlaneCoefficients (PointCloudT::Ptr cloud,
 	model_p->optimizeModelCoefficients ( inliers_plane, model_coefficients, new_coefficients);
 
 	model_coefficients = new_coefficients;
-
-	// std::cout << "The plane coefficients calibrated!" << std::endl;
-
-	// write the plane coefficients in  plane_coffficients.txt
-	// ofstream fout( "plane_coefficients.txt ", ios::app);
-	// fout << model_coefficients[0] << "       "
-	//      << model_coefficients[1] << "        "
-	//      << model_coefficients[2] << "        "
-	//      << model_coefficients[3] << std::endl << std::endl;
 }
 
 /**
@@ -597,14 +610,19 @@ void setGrideValue ( int x, int y)
 	if (y > 0)
 	{
 		occupancy_map.coordinatePositive(x - 1, y - 1) = 1;
+		// occupancy_map.coordinatePositive[x - 1, y - 1] = 1;
 		occupancy_map.pointsNumCounterPositive (x - 1, y - 1) += 1;
+		// occupancy_map.pointsNumCounterPositive [x - 1, y - 1] += 1;
 	}
 	else
 	{
 		occupancy_map.coordinateNegative(x - 1, abs(y) - 1) = 1;
+		// occupancy_map.coordinateNegative[x - 1, abs(y) - 1] = 1;
 		occupancy_map.pointsNumCounterNegative ( x - 1, abs(y) - 1 ) += 1;
+		// occupancy_map.pointsNumCounterNegative [ x - 1, abs(y) - 1 ] += 1;
 	}
 }
+
 
 /**
  * create the occupancy map and stock it in the struct OccupancyMap
@@ -623,7 +641,7 @@ void createOccupancyMap ( PointCloudT::Ptr cloud_obstacle, const std::vector<flo
 	origin.z = 0.f;
 
 	float height_origin = getDistanceFromPlane(model_coefficients, origin);
-	std::cout << " the origin point height = " << height_origin << std::endl;
+	// std::cout << " the origin point height = " << height_origin << std::endl;
 
 	origin.x = - height_origin * plane_normal.normal_x;
 	origin.y = - height_origin * plane_normal.normal_y;
@@ -667,122 +685,6 @@ void createOccupancyMap ( PointCloudT::Ptr cloud_obstacle, const std::vector<flo
 }
 
 /**
- * remove the grides which has less than 10 points projected into
- */
-void removeInvalideGride ()
-{
-	for (int x = 0; x  < occupancy_map.pointsNumCounterPositive.rows(); x++)
-		for (int y = 0; y < occupancy_map.pointsNumCounterPositive.cols(); y++)
-		{
-
-			if (occupancy_map.pointsNumCounterPositive(x, y) < 10 )
-				occupancy_map.coordinatePositive(x, y) = 0;
-			if (occupancy_map.pointsNumCounterNegative(x, y) < 10)
-				occupancy_map.coordinateNegative (x, y) = 0;
-		}
-}
-
-
-/**
- * get the velocity of translation
- * @return [the translate velocity]
- */
-float getTranslationVelocity()
-{
-	float minDist = DBL_MAX;
-	float dist;
-	int min_x = 0, min_y = 0;
-	for (int i = 0; i < numGrideLength; i++)
-	{
-		for (int j = 0; j < numGrideWidth; j++)
-		{
-			if (occupancy_map.coordinatePositive(i, j) == 1)
-			{
-				dist = sqrt(i * i + j * j);
-				if (dist < minDist)
-				{
-					minDist = dist;
-					min_x = i;
-					min_y = j;
-				}
-			}
-			if (occupancy_map.coordinateNegative(i, j) == 1)
-			{
-				dist = sqrt(i * i + j * j);
-				if (dist < minDist)
-				{
-					minDist = dist;
-					min_x = i;
-					min_y = j * (-1);
-				}
-			}
-		}
-	}
-	// std::cout << "min x = " << min_x << std::endl;
-	// std::cout << "min y = " << min_y << std::endl;
-	float translation_v = 0;
-	if (min_x == 0)
-	{
-		translation_v = v * 3 * spatial_resolution;
-	}
-	else
-	{
-		translation_v = v * min_x * spatial_resolution;
-	}
-	return translation_v;
-}
-
-/**
- * get the velocity of rotation
- * @return [the rotation velocity]
- */
-float getRotationVelocity()
-{
-	int numOccupiedGride = 0;
-	int sum_x = 0;
-	int sum_y = 0;
-	for (int i = 0; i < numGrideLength; i++)
-	{
-		for (int j = 0; j < numGrideWidth; j++)
-		{
-			if (occupancy_map.coordinatePositive(i, j) == 1)
-			{
-				numOccupiedGride++;
-				sum_x += i;
-				sum_y += j;
-			}
-			if (occupancy_map.coordinateNegative(i, j) == 1)
-			{
-				numOccupiedGride++;
-				sum_x += i;
-				sum_y -= j;
-			}
-		}
-	}
-
-	float rotation_v = 0.f;
-	if (numOccupiedGride == 0)
-	{
-		rotation_v = 0;
-	}
-	else
-	{
-		// std::cout << "number of occupied gride = " << numOccupiedGride << std::endl;
-		int center_x = sum_x / numOccupiedGride;
-		int center_y = sum_y / numOccupiedGride;
-		std::cout << "center = " << center_x << "    " << center_y << std::endl;
-
-		if ( center_x == 0)
-			rotation_v = 0;
-		else if ( center_y == 0)
-			rotation_v = w;
-		else
-			rotation_v = w * atan(center_x / center_y) ;
-	}
-	return rotation_v;
-}
-
-/**
  * set the velocity by the occupancy map, it send the translation velocity or the rotation velocity to the lower machine
  */
 void setVelocity()
@@ -798,11 +700,13 @@ void setVelocity()
 		for (int j = 0; j < numGrideWidth; j++)
 		{
 			if (occupancy_map.coordinatePositive(i, j) == 1)
+			// if (occupancy_map.coordinatePositive[i, j] == 1)
 			{
 				isRightOccupied = true;
 				numRightGride += 1;
 			}
 			if (occupancy_map.coordinateNegative(i, j) == 1)
+			// if (occupancy_map.coordinateNegative[i, j] == 1)
 			{
 				isLeftOccupied = true;
 				numLeftGride += 1;
@@ -936,54 +840,6 @@ void showMinValues(PointCloudT::Ptr &cloud)
 }
 
 
-/**
- * write all the occupied gride into files
- * the positive points were writen in the occupiedGride_positive.txt, and the negative points are writen in the occupiedGride_negative.txt
- */
-void printOccupiedGride()
-{
-	char filename[] = "occupiedGride_positive.txt";
-	std::ofstream fout(filename);
-
-	for (int x = 0; x < occupancy_map.coordinatePositive.rows(); x++)
-		for (int y = 0; y < occupancy_map.coordinatePositive.cols(); y++)
-			if (occupancy_map.coordinatePositive(x, y) == 1)
-				fout << x  << "," << y << std::endl;
-
-	char filename2[] = "occupiedGride_negative.txt";
-	std::ofstream fout2(filename2);
-
-	for (int x = 0; x < occupancy_map.coordinateNegative.rows(); x++)
-	{
-		for (int y = 0; y < occupancy_map.coordinateNegative.cols(); y++)
-			if (occupancy_map.coordinateNegative(x, y) == 1)
-				fout2 << x << "," << (y)*(-1) << std::endl;
-	}
-}
-
-/**
- * print the grides in the numGrideLength * (numGrideWidth*2) rectangle for calculate the velocity in the console
- */
-void showRectangle()
-{
-	for (int i = 0; i < numGrideLength; i++)
-	{
-		for (int j = numGrideWidth - 1; j > 0; j--)
-		{
-			std::cout << occupancy_map.coordinateNegative(i, j) << "    ";
-		}
-		std::cout << "  |";
-		for (int n = 0; n < numGrideWidth; n++)
-		{
-			std::cout << occupancy_map.coordinatePositive(i, n) << "    ";
-		}
-		std::cout << std::endl;
-	}
-}
-
-
-
-
 int main()
 {
 
@@ -1005,9 +861,16 @@ int main()
 
 	// pcl::ModelCoefficients::Ptr coefficients_plane (new pcl::ModelCoefficients);
 	Eigen::VectorXf model_coefficients;
+	model_coefficients.resize(4);
+	model_coefficients << 1, 1, 1, 1;
+	// std::cout<<model_coefficients<<std::endl;
+
 	cloud_mutex.lock ();   // for not overwriting the point cloud
 
 	pcl::removeNaNFromPointCloud(*cloud, *cloud, indices_Nans);
+
+	// pcl::PointCloud<PointT>::Ptr cloud_filtered (new pcl::PointCloud<PointT> ());
+
 
 	// std::cerr << "Point Cloud has: " << cloud->points.size () << " data points." << std::endl;
 
@@ -1036,25 +899,14 @@ int main()
 	// wait for the "q" is pressed
 	viewer.spin();
 
-	// convert the type ModelCoefficients to a Eigen vector
-	// Eigen::VectorXf model_coefficients;
-	// model_coefficients.resize(4);
-	// model_coefficients << coefficients_plane->values[0],
-	//                    coefficients_plane->values[1],
-	//                    coefficients_plane->values[2],
-	//                    coefficients_plane->values[3];
-
+	bool isStartPlaneRight = true;
 	bool isValid =  verifyPlaneModel(model_coefficients);
 	if (!isValid)
 	{
 		resetPlaneModel(model_coefficients);
 		std::cout << "the plane coefficients are not valid! They have been reset! " << std::endl;
+		isStartPlaneRight = false;
 	}
-	// std::vector<int> inlier_plane;
-	// double startTime = pcl::getTime();
-	// reComputePlaneModelCoefficients(cloud, model_coefficients, maxIteration, threshold, inlier_plane);
-	// double endTime = pcl::getTime();
-	// std::cout << "reComputePlaneModelCoefficients use " << endTime - startTime << "s" << std::endl;
 
 	pcl::Normal plane_normalVector(0.f, 0.f, 0.f);
 	setPlaneNormalVector(model_coefficients, plane_normalVector);
@@ -1067,42 +919,65 @@ int main()
 	pcl::visualization::PCLVisualizer viewer ("PCL Viewer");
 	viewer.setCameraPosition ( 0, 0, -2, 0, -1, 0, 0 );
 
+	// double time = pcl::getTime();
+
 	// for the fps
 	static unsigned count = 0;
 	static double last = pcl::getTime();
 	// openPort();
-
-	// ofstream fout( "plane_coefficients.txt ", ios::app);
-	// fout << "*****************************************************************" << std::endl;
 	while (!viewer.wasStopped())
 	{
 		// double startFrame = pcl::getTime();
 		if (new_cloud_available_flag && cloud_mutex.try_lock ())
 		{
-			// std::cerr<< "New point cloud !"<<std::endl;
 			new_cloud_available_flag = false;
 
 			std::vector<int> inliers_plane;
 
 			pcl::removeNaNFromPointCloud(*cloud, *cloud, indices_Nans);
-
+			// passthroughFilter(cloud, cloud, 2);
+			// std::cout<<model_coefficients<<std::endl;
 			if ( !verifyPlaneModel(model_coefficients) )
 			{
+				// sendVelocity(0, 0);
 				reComputePlaneModelCoefficients(cloud, model_coefficients, maxIteration, threshold, inliers_plane);
-				std::cout << "Current plane model is wrong! recompute the plane model" << std::endl;
+				// resetPlaneModel(model_coefficients);
+				std::cout << "Current plane model is wrong! reset the plane model" << std::endl;
+				
+				// viewer.spinOnce();
+				// new_cloud_available_flag = true;
+				// cloud_mutex.unlock ();
+				// continue;
 			}
 
 			inliers_plane = findPlanePoint (model_coefficients, threshold, cloud);
 			if (inliers_plane.size() == 0)
 			{
 				std::cout << "No points in the plane!!!" << std::endl;
-				reComputePlaneModelCoefficients(cloud, model_coefficients, maxIteration, threshold, inliers_plane);
-				// sendVelocity(0, 0);
-				std::cout << "recompute the plane model" << std::endl;
+				if ( !isStartPlaneRight)    // if aiibot is facing the wall or a big plane and it can see noting
+				{
+					std::cout << "Go back for a second!" << std::endl;
+					// sendVelocity(-v, 0);	 // it will go back for 2 second
+					sleep(1);
+					std::cout << "stop and recompute the plane" << std::endl;
+					// sendVelocity(0, 0);		 // then it will stop
+					isStartPlaneRight = true;
+
+				}
+				else
+				{
+					std::cout << "recompute the plane model" << std::endl;
+					// sendVelocity(0, 0);
+					reComputePlaneModelCoefficients(cloud, model_coefficients, maxIteration, threshold, inliers_plane);
+				}
+
+				viewer.spinOnce();
 				new_cloud_available_flag = true;
 				cloud_mutex.unlock ();
+				// double time = pcl::getTime();
 				continue;
 			}
+
 
 			//calculte the plane normal vector for every frame , maybe this is not necessary
 			cloud_plane = extractPlane ( cloud, inliers_plane );
@@ -1124,6 +999,7 @@ int main()
 			// setVelocity();
 			// double startReinitMap = pcl::getTime();
 			reinitOccupancyMap();
+			isStartPlaneRight = true;
 			// std::cout << "Reinit occupancy map use " << pcl::getTime() - startReinitMap << " s" << std::endl;
 
 			// double startShowCloud = pcl::getTime();
@@ -1153,6 +1029,7 @@ int main()
 				// optimizeModelCoefficients ( inliers, model_coefficients, model_coefficients);
 			}
 			cloud_mutex.unlock ();
+			// std::cout << "Time used = " << pcl::getTime() - time << std::endl;
 			// std::cout << "One frame use " << pcl::getTime() - startFrame << " m" << std::endl;
 		}
 	}
